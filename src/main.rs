@@ -40,5 +40,13 @@ fn main() {
         char::from(c)
     }).collect();
 
-    HuffmanTree::new(&frequencies, &map).unwrap();
+    let huff = HuffmanTree::new(&frequencies, &map).unwrap();
+
+	// let message = "test";
+	let message = text;
+	let string: Vec<char> = message.chars().collect();
+	let bits = huff.encode(string);
+	// println!("{message} -> {bits:?}");
+	let l = bits.len();
+	println!("{l} bits");
 }
