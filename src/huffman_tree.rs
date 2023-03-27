@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Result, Context};
-use std::{rc::Rc, collections::HashMap};
+use fnv::{FnvHasher, FnvHashMap};
+use std::{rc::Rc, collections::HashMap, hash::BuildHasherDefault};
 
 type NodeTable = Vec<(usize, Rc<Node>)>;
 
@@ -18,11 +19,10 @@ impl HuffmanTree {
 		}
 
 		let tree = Rc::clone(&table[0].1);
-		let mut lookup_table = HashMap::new();
+		let mut lookup_table = FnvHashMap::default();
 		Self::traverse(&tree, &mut lookup_table, &Bits::new());
 
 		let lookup_table = Self::convert_table(lookup_table);
-
 		Ok(HuffmanTree{lookup_table})
 	}
 
@@ -48,7 +48,7 @@ impl HuffmanTree {
 	///
 	/// Since there are only a few hundred options, this sacrifices a bit of
 	/// space to avoid running the hash function.
-	fn convert_table(table: HashMap<char, Bits>) -> Vec<Option<Bits>> {
+	fn convert_table(table: HashMap<char, Bits, BuildHasherDefault<FnvHasher>>) -> Vec<Option<Bits>> {
 		let (max_char, _) = table.iter()
 			.max_by_key(|(c, _)| u32::from(**c))
 			.unwrap();
@@ -101,7 +101,7 @@ impl HuffmanTree {
 	}
 
 	/// Traverse a subtree and extract its data into a lookup table
-	fn traverse(subtree: &Rc<Node>, table: &mut HashMap<char, Bits>, code: &Bits) {
+	fn traverse(subtree: &Rc<Node>, table: &mut HashMap<char, Bits, BuildHasherDefault<FnvHasher>>, code: &Bits) {
 		if let Some(value) = subtree.value {
 			table.insert(value, code.clone());
 		} else {
@@ -111,7 +111,7 @@ impl HuffmanTree {
 	}
 
 	/// Traverses down a child node in a subtree
-	fn traverse_child(child: &Option<Rc<Node>>, table: &mut HashMap<char, Bits>, code: &Bits, new_bit: bool) {
+	fn traverse_child(child: &Option<Rc<Node>>, table: &mut HashMap<char, Bits, BuildHasherDefault<FnvHasher>>, code: &Bits, new_bit: bool) {
 		if let Some(node) = child {
 			let mut code = code.clone();
 			code.add(new_bit);
@@ -122,7 +122,7 @@ impl HuffmanTree {
 
 
 	/// Initializes a sorted table of leaf nodes from a hash map of character frequencies
-	fn init_table(frequencies: HashMap<char, usize>) -> NodeTable {
+	fn init_table(frequencies: HashMap<char, usize, BuildHasherDefault<FnvHasher>>) -> NodeTable {
 		let mut table: Vec<(char, usize)> = frequencies.into_iter().collect();
 		table.sort_unstable_by_key(|e| e.1);
 
@@ -227,8 +227,8 @@ impl Node {
 /// Generates a list of letter frequencies
 ///
 /// Returns a map of characters and the number of times they appear
-fn get_letter_frequencies(string: &String) -> HashMap<char, usize> {
-	let mut frequencies: HashMap<char, usize> = HashMap::new();
+fn get_letter_frequencies(string: &String) -> HashMap<char, usize, BuildHasherDefault<FnvHasher>> {
+	let mut frequencies = FnvHashMap::with_capacity_and_hasher(62, Default::default());
 
 	for character in string.chars() {
 		let entry = frequencies.get_mut(&character);
@@ -257,7 +257,16 @@ mod benchmarks {
 		let text = std::fs::read_to_string("2022_fall-eecs660-pa2-input.txt")
 			.expect("Failed to read file");
 
-		b.iter(|| super::HuffmanTree::new(&text).expect("Failed to build Huffman tree"));
+		b.iter(|| super::HuffmanTree::new(&text));
+	}
+
+	// Get letter frequencies
+	#[bench]
+	fn get_letter_frequencies(b: &mut Bencher) {
+		let text = std::fs::read_to_string("2022_fall-eecs660-pa2-input.txt")
+			.expect("Failed to read file");
+
+		b.iter(|| super::get_letter_frequencies(&text));
 	}
 
 	// Encode a string
