@@ -228,7 +228,7 @@ impl Node {
 ///
 /// Returns a map of characters and the number of times they appear
 fn get_letter_frequencies(string: &String) -> HashMap<char, usize, BuildHasherDefault<FnvHasher>> {
-	let mut frequencies = FnvHashMap::with_capacity_and_hasher(62, Default::default());
+	let mut frequencies = FnvHashMap::with_capacity_and_hasher(100, Default::default());
 
 	for character in string.chars() {
 		let entry = frequencies.get_mut(&character);
