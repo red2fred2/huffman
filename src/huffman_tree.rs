@@ -76,8 +76,8 @@ impl HuffmanTree {
 		let mut encoded_string = Bits::new();
 
 		for character in string.chars() {
-			let mut encoded_character = self.encode_character(&character)?;
-			encoded_string.append(&mut encoded_character);
+			let encoded_character = self.encode_character(&character)?;
+			encoded_string.append(encoded_character);
 		}
 
 		Ok(encoded_string)
@@ -88,14 +88,14 @@ impl HuffmanTree {
 	/// This uses the lookup table learned from the example text provided at
 	/// construction. This function will fail if the character being encoded was
 	/// not in that initial text.
-	fn encode_character(&self, character: &char) -> Result<Bits> {
+	fn encode_character(&self, character: &char) -> Result<&Bits> {
 		let error_message = "Character not found in lookup table";
 
 		let index = *character as usize;
 		let result = self.lookup_table.get(index);
 
 		match result {
-			Some(res) => res.clone().context(error_message),
+			Some(res) => res.as_ref().context(error_message),
 			None => Err(anyhow!(error_message))
 		}
 	}
@@ -163,10 +163,10 @@ impl Bits {
 	}
 
 	/// Append another Bits object to this one
-	pub fn append(&mut self, other: &mut Self) {
-		// let mut col = other.collection.clone();
-		// self.collection.append(&mut col);
-		self.collection.append(&mut other.collection);
+	pub fn append(&mut self, other: &Self) {
+		for bit in other.collection.iter() {
+			self.add(*bit)
+		}
 	}
 
 	/// Get the number of bits in the collection
@@ -405,21 +405,5 @@ mod benchmarks {
 	fn bits_add(b: &mut Bencher) {
 		let mut bits = super::Bits::new();
 		b.iter(|| bits.add(black_box(true)));
-	}
-
-	// Clone bits
-	#[bench]
-	fn bits_clone(b: &mut Bencher) {
-		let mut bits = super::Bits::new();
-		bits.add(false);
-		bits.add(true);
-		bits.add(true);
-		bits.add(false);
-		bits.add(true);
-		bits.add(false);
-		bits.add(false);
-		bits.add(true);
-
-		b.iter(|| bits.clone());
 	}
 }
