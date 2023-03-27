@@ -1,10 +1,10 @@
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Result, Context};
 use std::{rc::Rc, collections::HashMap};
 
 type NodeTable = Vec<(usize, Rc<Node>)>;
 
 pub struct HuffmanTree {
-	lookup_table: HashMap<char, Bits>
+	lookup_table: Vec<Option<Bits>>
 }
 
 impl HuffmanTree {
@@ -20,6 +20,8 @@ impl HuffmanTree {
 		let tree = Rc::clone(&table[0].1);
 		let mut lookup_table = HashMap::new();
 		Self::traverse(&tree, &mut lookup_table, &Bits::new());
+
+		let lookup_table = Self::convert_table(lookup_table);
 
 		Ok(HuffmanTree{lookup_table})
 	}
@@ -40,6 +42,29 @@ impl HuffmanTree {
 
 		Self::insert_table_entry(table, num, node);
 		Ok(())
+	}
+
+	/// Converts the hashmap table to a Vec
+	///
+	/// Since there are only a few hundred options, this sacrifices a bit of
+	/// space to avoid running the hash function.
+	fn convert_table(table: HashMap<char, Bits>) -> Vec<Option<Bits>> {
+		let (max_char, _) = table.iter()
+			.max_by_key(|(c, _)| u32::from(**c))
+			.unwrap();
+
+		// Initialize table
+		let mut output_table = Vec::new();
+		for _ in 0..u32::from(*max_char) + 1 {
+			output_table.push(None);
+		}
+
+		table.iter().for_each(|(character, bits)| {
+			let index = *character as usize;
+			output_table[index] = Some(bits.clone());
+		});
+
+		output_table
 	}
 
 	/// Encodes a string to a Bits object using this Huffman tree
@@ -64,13 +89,14 @@ impl HuffmanTree {
 	/// construction. This function will fail if the character being encoded was
 	/// not in that initial text.
 	fn encode_character(&self, character: &char) -> Result<Bits> {
-		let result = self.lookup_table.get(character);
+		let error_message = "Character not found in lookup table";
+
+		let index = *character as usize;
+		let result = self.lookup_table.get(index);
 
 		match result {
-			Some(bits) => {
-				Ok(bits.clone())
-			},
-			None => Err(anyhow!(""))
+			Some(res) => res.clone().context(error_message),
+			None => Err(anyhow!(error_message))
 		}
 	}
 
@@ -264,7 +290,10 @@ mod benchmarks {
 		let tree = super::HuffmanTree::new(&text)
 			.expect("Failed to build Huffman tree");
 
-		b.iter(|| tree.lookup_table.get(black_box(&'c')));
+		b.iter(|| {
+			let index = 'Q' as usize;
+			let _ = tree.lookup_table.get(black_box(index));
+		})
 	}
 
 	// Append bits
