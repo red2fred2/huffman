@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use std::{rc::Rc, collections::HashMap};
 
 type NodeTable = Vec<(usize, Rc<Node>)>;
@@ -51,8 +51,8 @@ impl HuffmanTree {
 		let mut encoded_string = Bits::new();
 
 		for character in string.chars() {
-			let encoded_character = self.encode_character(&character)?;
-			encoded_string.append(encoded_character)
+			let mut encoded_character = self.encode_character(&character)?;
+			encoded_string.append(&mut encoded_character);
 		}
 
 		Ok(encoded_string)
@@ -63,9 +63,16 @@ impl HuffmanTree {
 	/// This uses the lookup table learned from the example text provided at
 	/// construction. This function will fail if the character being encoded was
 	/// not in that initial text.
-	fn encode_character(&self, character: &char) -> Result<&Bits> {
-		let result = self.lookup_table.get(character);
-		result.context("Character {character:?} not found in encoding table")
+	fn encode_character(&self, character: &char) -> Result<Bits> {
+		match self.lookup_table.get(character) {
+			Some(bits) => {
+				Ok(bits.clone())
+			},
+			None => Err(anyhow!(""))
+		}
+
+
+		// result.context("Character {character:?} not found in encoding table")
 	}
 
 	/// Traverse a subtree and extract its data into a lookup table
@@ -131,9 +138,10 @@ impl Bits {
 	}
 
 	/// Append another Bits object to this one
-	pub fn append(&mut self, other: &Self) {
-		let mut col = other.collection.clone();
-		self.collection.append(&mut col);
+	pub fn append(&mut self, other: &mut Self) {
+		// let mut col = other.collection.clone();
+		// self.collection.append(&mut col);
+		self.collection.append(&mut other.collection);
 	}
 
 	/// Get the number of bits in the collection
@@ -339,10 +347,10 @@ mod benchmarks {
 		other.add(false);
 		other.add(true);
 
-		b.iter(|| bits.append(&other));
+		b.iter(|| bits.append(&mut other));
 	}
 
-	// Append bits
+	// Add bits
 	#[bench]
 	fn bits_add(b: &mut Bencher) {
 		let mut bits = super::Bits::new();
