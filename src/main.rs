@@ -1,52 +1,47 @@
+#![feature(test)]
+extern crate test;
+
 mod huffman_tree;
 
-use std::fs;
-use anyhow::anyhow;
-
 use huffman_tree::HuffmanTree;
+use std::{fs, /*time::Instant*/};
 
 const TEXT_FILE_PATH: &str = "2022_fall-eecs660-pa2-input.txt";
 
-/// Returns a list of letter frequencies from the input string.
-/// Assumes only valid ASCII characters encoded 0-255.
-fn get_letter_frequencies(string: &String) -> anyhow::Result<Vec<f32>> {
-    // Throw a tantrum if it isn't ASCII
-    if !string.is_ascii() {
-        return Err(anyhow!("Input is not all ASCII characters"));
-    }
+fn main() {
+	let text = fs::read_to_string(TEXT_FILE_PATH)
+		.expect("Failed to read file");
 
-    // count up each letter in a table
-    let mut table: Vec<f32> = vec![0.0; 255];
+	// let timer = Instant::now();
 
-	for char in string.as_bytes() {
-		let index = usize::try_from(*char)?;
+	let tree = HuffmanTree::new(&text)
+		.expect("Failed to build Huffman tree");
+	let bits = tree.encode(&text)
+		.expect("Failed to encode message");
 
-        table[index] += 1.0;
-	}
+	let num_bits = bits.len();
 
-    // Sum it up
-	let total: f32 = table.iter().sum();
-	Ok(table.iter().map(|e| e / total).collect())
+	// let time = timer.elapsed().as_micros();
+	println!("{num_bits} bits");
+	// println!("time: {time}us")
 }
 
-fn main() {
-    let text = fs::read_to_string(TEXT_FILE_PATH)
-        .expect("Failed to read file");
+mod benchmarks {
+	#[allow(unused)]
+	use test::Bencher;
 
-    let frequencies = get_letter_frequencies(&text)
-        .unwrap();
+	// Full thing
+	#[bench]
+	fn main(b: &mut Bencher) {
+		b.iter(|| super::main());
+	}
 
-    let map = (0u8..255).map(|c| {
-        char::from(c)
-    }).collect();
-
-    let huff = HuffmanTree::new(&frequencies, &map).unwrap();
-
-	// let message = "test";
-	let message = text;
-	let string: Vec<char> = message.chars().collect();
-	let bits = huff.encode(string);
-	// println!("{message} -> {bits:?}");
-	let l = bits.len();
-	println!("{l} bits");
+	// Load file
+	#[bench]
+	fn load(b: &mut Bencher) {
+		b.iter(|| {
+			std::fs::read_to_string(super::TEXT_FILE_PATH)
+				.expect("Failed to read file")
+		});
+	}
 }

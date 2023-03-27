@@ -1,225 +1,351 @@
+use anyhow::{anyhow, Context, Result};
 use std::{rc::Rc, collections::HashMap};
-use anyhow::anyhow;
-use bit_vec::BitVec;
 
-pub struct HuffmanTree<T> {
-    lookup_table: HashMap<T, Bits>,
+type NodeTable = Vec<(usize, Rc<Node>)>;
+
+pub struct HuffmanTree {
+	lookup_table: HashMap<char, Bits>
 }
 
-impl<T: Copy + std::cmp::Eq + std::hash::Hash + core::fmt::Debug> HuffmanTree<T> {
-    /// Builds a Huffman tree based on a list of frequencies, and a map of what
-    /// symbol is represented by each place in the list.
-    pub fn new(frequencies: &Vec<f32>, map: &Vec<T>) -> anyhow::Result<Self> {
-        let mut table = build_table(frequencies, map)?;
+impl HuffmanTree {
+	/// Construct a new Huffman tree from example text
+	pub fn new(example_text: &String) -> Result<Self> {
+		let frequencies = get_letter_frequencies(&example_text);
+		let mut table = Self::init_table(frequencies);
 
-        while table.len() > 1 {
-            // Do the witchcraft
-            let (left_probability, left_node) = table.remove(0);
-            let (right_probability, right_node) = table.remove(0);
-
-            let left_child = Some(Rc::clone(&left_node));
-            let right_child = Some(Rc::clone(&right_node));
-
-            let node = Rc::new(Node {is_leaf: false, left_child, right_child, value: None});
-
-            let probability = left_probability + right_probability;
-
-            match table.binary_search_by(|e| {
-                f32_nans_last(e.0, probability)
-            }) {
-                Ok(pos) => table.insert(pos, (probability, node)),
-                Err(pos) => table.insert(pos, (probability, node)),
-            };
-        }
-
-        let tree = Rc::clone(&table[0].1);
-        let lookup_table = generate_lookup_table(tree);
-
-		println!("{lookup_table:#?}");
-        Ok(HuffmanTree{lookup_table})
-    }
-
-	pub fn encode(&self, str: Vec<T>) -> Bits {
-		let mut bits = Bits::new();
-
-		for c in str {
-			let encoded = self.lookup_table
-				.get(&c)
-				.expect("Character not found in encoding table");
-			bits.append(encoded);
+		while table.len() > 1 {
+			Self::build_tree(&mut table)?;
 		}
 
-		bits
+		let tree = Rc::clone(&table[0].1);
+		let mut lookup_table = HashMap::new();
+		Self::traverse(&tree, &mut lookup_table, &Bits::new());
+
+		Ok(HuffmanTree{lookup_table})
 	}
 
+	/// Runs one step of building the tree
+	///
+	/// This will error when there are less than two nodes to combine.
+	fn build_tree(table: &mut NodeTable) -> Result<()> {
+		if table.len() < 2 {
+			return Err(anyhow!("Attempt to build tree without two nodes to combine"));
+		}
+
+		let (n1, left) = table.remove(0);
+		let (n2, right) = table.remove(0);
+
+		let num = n1 + n2;
+		let node = Rc::new(Node::new_parent(left, right));
+
+		Self::insert_table_entry(table, num, node);
+		Ok(())
+	}
+
+	/// Encodes a string to a Bits object using this Huffman tree
+	///
+	/// This uses the lookup table learned from the example text provided at
+	/// construction. This function will fail if any characters being encoded
+	/// were not in that initial text.
+	pub fn encode(&self, string: &String) -> Result<Bits> {
+		let mut encoded_string = Bits::new();
+
+		for character in string.chars() {
+			let encoded_character = self.encode_character(&character)?;
+			encoded_string.append(encoded_character)
+		}
+
+		Ok(encoded_string)
+	}
+
+	/// Encodes a single character to a Bits object using this Huffman tree
+	///
+	/// This uses the lookup table learned from the example text provided at
+	/// construction. This function will fail if the character being encoded was
+	/// not in that initial text.
+	fn encode_character(&self, character: &char) -> Result<&Bits> {
+		let result = self.lookup_table.get(character);
+		result.context("Character {character:?} not found in encoding table")
+	}
+
+	/// Traverse a subtree and extract its data into a lookup table
+	fn traverse(subtree: &Rc<Node>, table: &mut HashMap<char, Bits>, code: &Bits) {
+		if let Some(value) = subtree.value {
+			table.insert(value, code.clone());
+		} else {
+			Self::traverse_child(&subtree.left_child, table, code, false);
+			Self::traverse_child(&subtree.right_child, table, code, true);
+		}
+	}
+
+	/// Traverses down a child node in a subtree
+	fn traverse_child(child: &Option<Rc<Node>>, table: &mut HashMap<char, Bits>, code: &Bits, new_bit: bool) {
+		if let Some(node) = child {
+			let mut code = code.clone();
+			code.add(new_bit);
+
+			Self::traverse(&node, table, &code);
+		}
+	}
+
+
+	/// Initializes a sorted table of leaf nodes from a hash map of character frequencies
+	fn init_table(frequencies: HashMap<char, usize>) -> NodeTable {
+		let mut table: Vec<(char, usize)> = frequencies.into_iter().collect();
+		table.sort_unstable_by_key(|e| e.1);
+
+		table.iter()
+			.map(|(character, num)| {
+				let node = Node::new_leaf(*character);
+				(*num, Rc::new(node))
+			})
+			.collect()
+	}
+
+	/// Finds a spot to insert an entry into a node table
+	fn insert_table_entry(table: &mut NodeTable, num: usize, node: Rc<Node>) {
+		let position = table.binary_search_by_key(&num, |(n, _)| *n);
+
+		match position {
+			Ok(pos) => table.insert(pos, (num, node)),
+			Err(pos) => table.insert(pos, (num, node)),
+		}
+	}
 }
 
 #[derive(Clone)]
+/// A collection of individual bits
 pub struct Bits {
-	length: usize,
-	collection: BitVec,
+	collection: Vec<bool>
 }
 
 impl Bits {
+	/// Constructs an empty collection of bits
 	pub fn new() -> Self {
-		Bits {
-			length: 0,
-			collection: BitVec::new(),
-		}
+		Bits {collection: Vec::new()}
 	}
 
-	pub fn add(&mut self, bit: u8) {
-		let len = self.len();
-
-		if self.collection.len() == len {
-			let mut other = BitVec::from_bytes(&[0x0]);
-			self.collection.append(&mut other);
-		}
-
-		self.collection.set(len, bit & 0x01 == 0x01);
-		self.length += 1;
+	/// Adds a single bit to the end of this collection
+	pub fn add(&mut self, bit: bool) {
+		self.collection.push(bit);
 	}
 
-	/// I'm getting tired of bit level stuff, I'm just going to do this naively
+	/// Append another Bits object to this one
 	pub fn append(&mut self, other: &Self) {
-		other.get().chars().for_each(|c| self.add(ctob(c)));
+		let mut col = other.collection.clone();
+		self.collection.append(&mut col);
 	}
 
+	/// Get the number of bits in the collection
 	pub fn len(&self) -> usize {
-		self.length
-	}
-
-	pub fn get(&self) -> String {
-		let mut str = String::new();
-
-		for i in 0..self.len() {
-			let bit = self.collection.get(i).expect("BitVec freaked out");
-			str += if bit {"1"} else {"0"};
-		}
-
-		str
+		self.collection.len()
 	}
 }
 
 impl std::fmt::Debug for Bits {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		let bits = self.get();
-		write!(f, "{bits}")
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "{}", self.to_string())
+	}
+}
+
+impl std::string::ToString for Bits {
+    fn to_string(&self) -> String {
+		self.collection.iter().map(|e| {
+			match e {
+				false => "0",
+				true => "1"
+			}
+		}).collect()
     }
 }
 
 #[derive(Clone, Debug)]
-struct Node<T>
-where T: Clone {
-    is_leaf: bool,
-    left_child: Option<Rc<Node<T>>>,
-    right_child: Option<Rc<Node<T>>>,
-    value: Option<T>,
+/// A node in a Huffman tree
+struct Node {
+	left_child: Option<Rc<Node>>,
+	right_child: Option<Rc<Node>>,
+	value: Option<char>,
 }
 
-fn build_table<T>(frequencies: &Vec<f32>, map: &Vec<T>) -> anyhow::Result<Vec<(f32, Rc<Node<T>>)>>
-where T: Copy {
-    // Load table
-    let mut table = zip(frequencies, map)?;
+impl Node {
+	/// Constructs a new parent node
+	///
+	/// * `left` - The left child node
+	/// * `right` - The right child node
+	fn new_parent(left: Rc<Node>, right: Rc<Node>) -> Self {
+		let left_child = Some(Rc::clone(&left));
+		let right_child = Some(Rc::clone(&right));
 
-    // Sort it
-    table.sort_unstable_by(|a, b| {
-        f32_nans_last(a.0, b.0)
-    });
-
-    // Filter out unused
-    Ok(
-        table.iter()
-        .map(|e| *e)
-        .filter(|e| e.0 > 0.0)
-        .map(|(p, v)| {
-            let node = Node {
-                is_leaf: true,
-                left_child: None,
-                right_child: None,
-                value: Some(v)
-            };
-
-            (p, Rc::new(node))
-        })
-        .collect()
-    )
-}
-
-fn ctob(c: char) -> u8 {
-	match c {
-		'0' => 0x0,
-		'1' => 0x1,
-		_ => panic!()
+		Node {left_child, right_child, value: None}
 	}
-}
 
-/// f32 ordering function since testing if floats are equivalent is a nightmare
-/// Stolen from https://users.rust-lang.org/t/sorting-a-vec-of-f32-without-ever-panic/37540/2
-fn f32_nans_last(a: f32, b: f32) -> std::cmp::Ordering {
-    match a.partial_cmp(&b) {
-        Some(ord) => ord,
-        None => match (a.is_nan(), b.is_nan()) {
-            (true, true) => std::cmp::Ordering::Equal,
-            (true, _) => std::cmp::Ordering::Greater,
-            (_, true) => std::cmp::Ordering::Less,
-            (_, _) => std::cmp::Ordering::Equal, // should never happen
-        },
-    }
-}
-
-fn generate_lookup_table<T>(tree: Rc<Node<T>>) -> HashMap<T, Bits>
-where T: Clone + std::cmp::Eq + std::hash::Hash {
-    let mut table = HashMap::new();
-
-	fn traverse<T>(subtree: Rc<Node<T>>, table: &mut HashMap<T, Bits>, code: Bits)
-	where T: Clone + std::cmp::Eq + std::hash::Hash {
-		let subtree = (*subtree).clone();
-
-		if subtree.is_leaf {
-			// Slap that value in the table
-			let value = subtree.value.expect("Node marked as leaf with no value");
-			table.insert(value, code);
-		} else {
-			// Traverse children
-			match subtree.left_child {
-				Some(node) => {
-					let mut code = code.clone();
-					code.add(0);
-
-					traverse(node, table, code)
-				},
-				_ => ()
-			};
-
-			match subtree.right_child {
-				Some(node) => {
-					let mut code = code.clone();
-					code.add(1);
-
-					traverse(node, table, code)
-				},
-				_ => ()
-			};
+	/// Constructs a new leaf node
+	///
+	/// * `character` - The character value of this leaf node
+	fn new_leaf(character: char) -> Self {
+		Node {
+			left_child: None,
+			right_child: None,
+			value: Some(character)
 		}
 	}
-
-	traverse(tree, &mut table, Bits::new());
-    table
 }
 
-/// Zips two Vecs together in a nicer way than standard rust
-fn zip<A, B>(a: &Vec<A>, b: &Vec<B>) -> anyhow::Result<Vec<(A, B)>>
-where A: Copy, B: Copy {
-    if a.len() != b.len() {
-        return Err(anyhow!("Vectors are not the same size"));
-    }
+/// Generates a list of letter frequencies
+///
+/// Returns a map of characters and the number of times they appear
+fn get_letter_frequencies(string: &String) -> HashMap<char, usize> {
+	let mut frequencies: HashMap<char, usize> = HashMap::new();
 
-    let mut zipper = Vec::new();
+	for character in string.chars() {
+		let entry = frequencies.get_mut(&character);
 
-    for i in 0..a.len() {
-        zipper.push((a[i], b[i]));
-    }
+		match entry {
+			Some(e) => *e += 1,
+			None => {frequencies.insert(character, 1);}
+		};
+	}
 
-    Ok(zipper)
+	frequencies
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+mod benchmarks {
+
+#[allow(unused)]
+	use test::Bencher;
+
+	// Construct a new tree
+	#[bench]
+	fn huffman_tree_new(b: &mut Bencher) {
+		let text = std::fs::read_to_string("2022_fall-eecs660-pa2-input.txt")
+			.expect("Failed to read file");
+
+		b.iter(|| super::HuffmanTree::new(&text).expect("Failed to build Huffman tree"));
+	}
+
+	// Encode a string
+	#[bench]
+	fn huffman_tree_encode(b: &mut Bencher) {
+		let text = std::fs::read_to_string("2022_fall-eecs660-pa2-input.txt")
+			.expect("Failed to read file");
+		let tree = super::HuffmanTree::new(&text)
+			.expect("Failed to build Huffman tree");
+
+		b.iter(|| tree.encode(&text));
+	}
+
+	// Encode a character
+	#[bench]
+	fn huffman_tree_encode_character(b: &mut Bencher) {
+		let text = std::fs::read_to_string("2022_fall-eecs660-pa2-input.txt")
+			.expect("Failed to read file");
+		let tree = super::HuffmanTree::new(&text)
+			.expect("Failed to build Huffman tree");
+
+		b.iter(|| tree.encode_character(&'c'));
+	}
+
+	// Append bits
+	#[bench]
+	fn bits_append(b: &mut Bencher) {
+		let mut bits = super::Bits::new();
+		bits.add(true);
+		bits.add(true);
+		bits.add(true);
+		bits.add(true);
+		bits.add(true);
+		bits.add(true);
+		bits.add(false);
+		bits.add(false);
+		bits.add(true);
+		bits.add(false);
+		bits.add(false);
+		bits.add(true);
+		bits.add(true);
+		bits.add(true);
+		bits.add(true);
+		bits.add(true);
+		bits.add(true);
+		bits.add(false);
+		bits.add(false);
+		bits.add(true);
+		bits.add(false);
+		bits.add(false);
+		bits.add(true);
+		bits.add(true);
+		bits.add(true);
+		bits.add(true);
+		bits.add(true);
+		bits.add(true);
+		bits.add(false);
+		bits.add(false);
+		bits.add(true);
+		bits.add(false);
+		bits.add(false);
+		bits.add(true);
+		bits.add(true);
+		bits.add(true);
+		bits.add(true);
+		bits.add(true);
+		bits.add(true);
+		bits.add(false);
+		bits.add(false);
+		bits.add(true);
+		bits.add(false);
+		bits.add(false);
+		bits.add(true);
+		bits.add(true);
+		bits.add(true);
+		bits.add(true);
+		bits.add(true);
+		bits.add(true);
+		bits.add(false);
+		bits.add(false);
+		bits.add(true);
+		bits.add(false);
+		bits.add(false);
+		bits.add(true);
+		bits.add(true);
+		bits.add(true);
+		bits.add(true);
+		bits.add(true);
+		bits.add(true);
+		bits.add(false);
+		bits.add(false);
+		bits.add(true);
+		bits.add(false);
+		bits.add(false);
+		bits.add(true);
+		bits.add(true);
+		bits.add(true);
+		bits.add(true);
+		bits.add(true);
+		bits.add(true);
+		bits.add(false);
+		bits.add(false);
+		bits.add(true);
+		bits.add(false);
+		bits.add(false);
+
+		let mut other = super::Bits::new();
+		other.add(false);
+		other.add(true);
+		other.add(true);
+		other.add(false);
+		other.add(true);
+		other.add(false);
+		other.add(false);
+		other.add(true);
+
+		b.iter(|| bits.append(&other));
+	}
+
+	// Append bits
+	#[bench]
+	fn bits_add(b: &mut Bencher) {
+		let mut bits = super::Bits::new();
+		b.iter(|| bits.add(true));
+	}
 }
