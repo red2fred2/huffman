@@ -1,6 +1,8 @@
 use anyhow::{anyhow, Result, Context};
 use fnv::{FnvHasher, FnvHashMap};
 use std::{rc::Rc, collections::HashMap, hash::BuildHasherDefault};
+use super::bits::Bits;
+use super::huffman_node::Node;
 
 type NodeTable = Vec<(usize, Rc<Node>)>;
 
@@ -145,85 +147,6 @@ impl HuffmanTree {
 	}
 }
 
-#[derive(Clone)]
-/// A collection of individual bits
-pub struct Bits {
-	collection: Vec<bool>
-}
-
-impl Bits {
-	/// Constructs an empty collection of bits
-	pub fn new() -> Self {
-		Bits {collection: Vec::new()}
-	}
-
-	/// Adds a single bit to the end of this collection
-	pub fn add(&mut self, bit: bool) {
-		self.collection.push(bit);
-	}
-
-	/// Append another Bits object to this one
-	pub fn append(&mut self, other: &Self) {
-		for bit in other.collection.iter() {
-			self.add(*bit)
-		}
-	}
-
-	/// Get the number of bits in the collection
-	pub fn len(&self) -> usize {
-		self.collection.len()
-	}
-}
-
-impl std::fmt::Debug for Bits {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		write!(f, "{}", self.to_string())
-	}
-}
-
-impl std::string::ToString for Bits {
-    fn to_string(&self) -> String {
-		self.collection.iter().map(|e| {
-			match e {
-				false => "0",
-				true => "1"
-			}
-		}).collect()
-    }
-}
-
-#[derive(Clone, Debug)]
-/// A node in a Huffman tree
-struct Node {
-	left_child: Option<Rc<Node>>,
-	right_child: Option<Rc<Node>>,
-	value: Option<char>,
-}
-
-impl Node {
-	/// Constructs a new parent node
-	///
-	/// * `left` - The left child node
-	/// * `right` - The right child node
-	fn new_parent(left: Rc<Node>, right: Rc<Node>) -> Self {
-		let left_child = Some(Rc::clone(&left));
-		let right_child = Some(Rc::clone(&right));
-
-		Node {left_child, right_child, value: None}
-	}
-
-	/// Constructs a new leaf node
-	///
-	/// * `character` - The character value of this leaf node
-	fn new_leaf(character: char) -> Self {
-		Node {
-			left_child: None,
-			right_child: None,
-			value: Some(character)
-		}
-	}
-}
-
 /// Generates a list of letter frequencies
 ///
 /// Returns a map of characters and the number of times they appear
@@ -242,22 +165,44 @@ fn get_letter_frequencies(string: &String) -> HashMap<char, usize, BuildHasherDe
 	frequencies
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
 mod benchmarks {
 
 	#[allow(unused)]
 	use test::Bencher;
 	#[allow(unused)]
 	use test::black_box;
+	#[allow(unused)]
+	use super::HuffmanTree;
 
 	// Construct a new tree
 	#[bench]
-	fn huffman_tree_new(b: &mut Bencher) {
+	fn new(b: &mut Bencher) {
 		let text = std::fs::read_to_string("2022_fall-eecs660-pa2-input.txt")
 			.expect("Failed to read file");
 
-		b.iter(|| super::HuffmanTree::new(&text));
+		b.iter(|| HuffmanTree::new(&text));
+	}
+
+	// Encode a string
+	#[bench]
+	fn encode(b: &mut Bencher) {
+		let text = std::fs::read_to_string("2022_fall-eecs660-pa2-input.txt")
+			.expect("Failed to read file");
+		let tree = super::HuffmanTree::new(&text)
+			.expect("Failed to build Huffman tree");
+
+		b.iter(|| tree.encode(&text));
+	}
+
+	// Encode a character
+	#[bench]
+	fn encode_character(b: &mut Bencher) {
+		let text = std::fs::read_to_string("2022_fall-eecs660-pa2-input.txt")
+			.expect("Failed to read file");
+		let tree = super::HuffmanTree::new(&text)
+			.expect("Failed to build Huffman tree");
+
+		b.iter(|| tree.encode_character(black_box(&'c')));
 	}
 
 	// Get letter frequencies
@@ -269,31 +214,9 @@ mod benchmarks {
 		b.iter(|| super::get_letter_frequencies(&text));
 	}
 
-	// Encode a string
-	#[bench]
-	fn huffman_tree_encode(b: &mut Bencher) {
-		let text = std::fs::read_to_string("2022_fall-eecs660-pa2-input.txt")
-			.expect("Failed to read file");
-		let tree = super::HuffmanTree::new(&text)
-			.expect("Failed to build Huffman tree");
-
-		b.iter(|| tree.encode(&text));
-	}
-
-	// Encode a character
-	#[bench]
-	fn huffman_tree_encode_character(b: &mut Bencher) {
-		let text = std::fs::read_to_string("2022_fall-eecs660-pa2-input.txt")
-			.expect("Failed to read file");
-		let tree = super::HuffmanTree::new(&text)
-			.expect("Failed to build Huffman tree");
-
-		b.iter(|| tree.encode_character(black_box(&'c')));
-	}
-
 	// Lookup bits from table
 	#[bench]
-	fn huffman_tree_lookup(b: &mut Bencher) {
+	fn tree_lookup(b: &mut Bencher) {
 		let text = std::fs::read_to_string("2022_fall-eecs660-pa2-input.txt")
 			.expect("Failed to read file");
 		let tree = super::HuffmanTree::new(&text)
@@ -303,107 +226,5 @@ mod benchmarks {
 			let index = 'Q' as usize;
 			let _ = tree.lookup_table.get(black_box(index));
 		})
-	}
-
-	// Append bits
-	#[bench]
-	fn bits_append(b: &mut Bencher) {
-		let mut bits = super::Bits::new();
-		bits.add(true);
-		bits.add(true);
-		bits.add(true);
-		bits.add(true);
-		bits.add(true);
-		bits.add(true);
-		bits.add(false);
-		bits.add(false);
-		bits.add(true);
-		bits.add(false);
-		bits.add(false);
-		bits.add(true);
-		bits.add(true);
-		bits.add(true);
-		bits.add(true);
-		bits.add(true);
-		bits.add(true);
-		bits.add(false);
-		bits.add(false);
-		bits.add(true);
-		bits.add(false);
-		bits.add(false);
-		bits.add(true);
-		bits.add(true);
-		bits.add(true);
-		bits.add(true);
-		bits.add(true);
-		bits.add(true);
-		bits.add(false);
-		bits.add(false);
-		bits.add(true);
-		bits.add(false);
-		bits.add(false);
-		bits.add(true);
-		bits.add(true);
-		bits.add(true);
-		bits.add(true);
-		bits.add(true);
-		bits.add(true);
-		bits.add(false);
-		bits.add(false);
-		bits.add(true);
-		bits.add(false);
-		bits.add(false);
-		bits.add(true);
-		bits.add(true);
-		bits.add(true);
-		bits.add(true);
-		bits.add(true);
-		bits.add(true);
-		bits.add(false);
-		bits.add(false);
-		bits.add(true);
-		bits.add(false);
-		bits.add(false);
-		bits.add(true);
-		bits.add(true);
-		bits.add(true);
-		bits.add(true);
-		bits.add(true);
-		bits.add(true);
-		bits.add(false);
-		bits.add(false);
-		bits.add(true);
-		bits.add(false);
-		bits.add(false);
-		bits.add(true);
-		bits.add(true);
-		bits.add(true);
-		bits.add(true);
-		bits.add(true);
-		bits.add(true);
-		bits.add(false);
-		bits.add(false);
-		bits.add(true);
-		bits.add(false);
-		bits.add(false);
-
-		let mut other = super::Bits::new();
-		other.add(false);
-		other.add(true);
-		other.add(true);
-		other.add(false);
-		other.add(true);
-		other.add(false);
-		other.add(false);
-		other.add(true);
-
-		b.iter(|| bits.append(black_box(&mut other)));
-	}
-
-	// Add bits
-	#[bench]
-	fn bits_add(b: &mut Bencher) {
-		let mut bits = super::Bits::new();
-		b.iter(|| bits.add(black_box(true)));
 	}
 }
