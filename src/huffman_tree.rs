@@ -64,15 +64,14 @@ impl HuffmanTree {
 	/// construction. This function will fail if the character being encoded was
 	/// not in that initial text.
 	fn encode_character(&self, character: &char) -> Result<Bits> {
-		match self.lookup_table.get(character) {
+		let result = self.lookup_table.get(character);
+
+		match result {
 			Some(bits) => {
 				Ok(bits.clone())
 			},
 			None => Err(anyhow!(""))
 		}
-
-
-		// result.context("Character {character:?} not found in encoding table")
 	}
 
 	/// Traverse a subtree and extract its data into a lookup table
@@ -221,8 +220,10 @@ fn get_letter_frequencies(string: &String) -> HashMap<char, usize> {
 
 mod benchmarks {
 
-#[allow(unused)]
+	#[allow(unused)]
 	use test::Bencher;
+	#[allow(unused)]
+	use test::black_box;
 
 	// Construct a new tree
 	#[bench]
@@ -252,7 +253,18 @@ mod benchmarks {
 		let tree = super::HuffmanTree::new(&text)
 			.expect("Failed to build Huffman tree");
 
-		b.iter(|| tree.encode_character(&'c'));
+		b.iter(|| tree.encode_character(black_box(&'c')));
+	}
+
+	// Lookup bits from table
+	#[bench]
+	fn huffman_tree_lookup(b: &mut Bencher) {
+		let text = std::fs::read_to_string("2022_fall-eecs660-pa2-input.txt")
+			.expect("Failed to read file");
+		let tree = super::HuffmanTree::new(&text)
+			.expect("Failed to build Huffman tree");
+
+		b.iter(|| tree.lookup_table.get(black_box(&'c')));
 	}
 
 	// Append bits
@@ -347,13 +359,29 @@ mod benchmarks {
 		other.add(false);
 		other.add(true);
 
-		b.iter(|| bits.append(&mut other));
+		b.iter(|| bits.append(black_box(&mut other)));
 	}
 
 	// Add bits
 	#[bench]
 	fn bits_add(b: &mut Bencher) {
 		let mut bits = super::Bits::new();
-		b.iter(|| bits.add(true));
+		b.iter(|| bits.add(black_box(true)));
+	}
+
+	// Clone bits
+	#[bench]
+	fn bits_clone(b: &mut Bencher) {
+		let mut bits = super::Bits::new();
+		bits.add(false);
+		bits.add(true);
+		bits.add(true);
+		bits.add(false);
+		bits.add(true);
+		bits.add(false);
+		bits.add(false);
+		bits.add(true);
+
+		b.iter(|| bits.clone());
 	}
 }
